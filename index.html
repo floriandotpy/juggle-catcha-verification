@@ -477,6 +477,7 @@ startBtn.addEventListener("click", async () => {
       } else if (matches.length === 0) {
         msg += `\nIch habe gar nichts erkannt.`;
       }
+      msg += `\n\n💡 Tipp: Halte die Objekte näher an die Kamera und achte auf gute Beleuchtung.`;
       resultEl.textContent = msg;
     }
     resultEl.style.display = "block";
