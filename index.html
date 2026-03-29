@@ -74,8 +74,25 @@
     margin-bottom: 16px;
     font-size: 13px;
     color: #1a3d5c;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
   }
   .task-box strong { color: #0066a2; }
+  #rerollBtn {
+    flex-shrink: 0;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-family: Verdana, sans-serif;
+    cursor: pointer;
+    background: #fff;
+    color: #0066a2;
+    border: 1px solid #0066a2;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  #rerollBtn:hover { background: #e8f2f8; }
 
   /* --- Status --- */
   #status {
@@ -193,7 +210,8 @@
     <div class="content">
       <!-- Task -->
       <div class="task-box">
-        📋 <strong>Aufgabe:</strong> Halte <strong>ZWEI</strong> Jonglierbälle in die Kamera.
+        <span id="taskText"></span>
+        <button id="rerollBtn">🔀 Andere Aufgabe</button>
       </div>
 
       <!-- Result -->
@@ -232,9 +250,44 @@ const COCO_CLASSES = [
 ];
 
 const SPORTS_BALL_ID = 32;
+const FRISBEE_ID = 29;
 const CONF_THRESHOLD = 0.25;
 const IOU_THRESHOLD = 0.5;
 const MODEL_SIZE = 640;
+
+// --- Tasks ---
+const TASKS = [
+  { classId: SPORTS_BALL_ID, count: 1, label: "Jonglierball",  plural: "Jonglierbälle" },
+  { classId: SPORTS_BALL_ID, count: 2, label: "Jonglierbälle", plural: "Jonglierbälle" },
+  { classId: SPORTS_BALL_ID, count: 3, label: "Jonglierbälle", plural: "Jonglierbälle" },
+  { classId: FRISBEE_ID,     count: 1, label: "Jonglierring",  plural: "Jonglierringe" },
+  { classId: FRISBEE_ID,     count: 2, label: "Jonglierringe", plural: "Jonglierringe" },
+  { classId: FRISBEE_ID,     count: 3, label: "Jonglierringe", plural: "Jonglierringe" },
+];
+
+// Display name overrides for COCO classes
+const DISPLAY_NAMES = { 29: "Jonglierring", 32: "Jonglierball" };
+
+let currentTask = null;
+
+function pickTask(excludeCurrent) {
+  let pool = TASKS;
+  if (excludeCurrent && TASKS.length > 1) {
+    pool = TASKS.filter(t => t !== currentTask);
+  }
+  currentTask = pool[Math.floor(Math.random() * pool.length)];
+  renderTask();
+}
+
+function renderTask() {
+  const numWord = ["", "EINEN", "ZWEI", "DREI"][currentTask.count];
+  document.getElementById("taskText").innerHTML =
+    `📋 <strong>Aufgabe:</strong> Halte <strong>${numWord}</strong> ${currentTask.label} in die Kamera.`;
+}
+
+function displayName(classId) {
+  return DISPLAY_NAMES[classId] || COCO_CLASSES[classId];
+}
 
 let session = null;
 
@@ -246,6 +299,10 @@ const snapshotEl  = document.getElementById("snapshot");
 const overlayEl   = document.getElementById("overlay");
 const countdownEl = document.getElementById("countdown");
 const resultEl    = document.getElementById("result");
+
+// Pick initial task & wire reroll
+pickTask(false);
+document.getElementById("rerollBtn").addEventListener("click", () => pickTask(true));
 
 // --- Load model ---
 async function loadModel() {
@@ -335,19 +392,21 @@ startBtn.addEventListener("click", async () => {
     drawDetections(overlayCtx, detections);
 
     // 6. Result
-    const balls = detections.filter(d => d.classId === SPORTS_BALL_ID);
+    const targetId = currentTask.classId;
+    const needed = currentTask.count;
+    const matches = detections.filter(d => d.classId === targetId);
     statusEl.textContent = "";
-    if (balls.length >= 2) {
+    if (matches.length >= needed) {
       resultEl.className = "success";
-      resultEl.textContent = `✅ Verifizierung bestanden! ${balls.length} Bälle erkannt.`;
+      resultEl.textContent = `✅ Verifizierung bestanden! ${matches.length} ${matches.length === 1 ? currentTask.label : currentTask.plural} erkannt.`;
     } else {
       resultEl.className = "fail";
-      const others = detections.filter(d => d.classId !== SPORTS_BALL_ID);
-      let msg = `❌ Nur ${balls.length} Ball/Bälle erkannt.`;
+      const others = detections.filter(d => d.classId !== targetId);
+      let msg = `❌ Nur ${matches.length} von ${needed} ${currentTask.plural} erkannt.`;
       if (others.length > 0) {
-        const seen = others.map(d => `${COCO_CLASSES[d.classId]} (${(d.score*100).toFixed(0)}%)`);
+        const seen = others.map(d => `${displayName(d.classId)} (${(d.score*100).toFixed(0)}%)`);
         msg += `\nIch habe stattdessen gesehen: ${seen.join(", ")}`;
-      } else {
+      } else if (matches.length === 0) {
         msg += `\nIch habe gar nichts erkannt.`;
       }
       resultEl.textContent = msg;
@@ -446,9 +505,9 @@ function iou(a, b) {
 function drawDetections(ctx, detections) {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   for (const d of detections) {
-    const isBall = d.classId === SPORTS_BALL_ID;
-    const color = isBall ? "#2a9d2a" : "#0066a2";
-    const label = `${COCO_CLASSES[d.classId]} ${(d.score*100).toFixed(0)}%`;
+    const isTarget = d.classId === currentTask.classId;
+    const color = isTarget ? "#2a9d2a" : "#0066a2";
+    const label = `${displayName(d.classId)} ${(d.score*100).toFixed(0)}%`;
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.strokeRect(d.x1, d.y1, d.x2 - d.x1, d.y2 - d.y1);
