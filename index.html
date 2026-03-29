@@ -130,7 +130,7 @@
     border-radius: 3px;
     overflow: hidden;
   }
-  video, #snapshot, #overlay {
+  video, #snapshot {
     width: 100%;
     display: block;
   }
@@ -139,6 +139,7 @@
     position: absolute;
     top: 0; left: 0;
     width: 100%; height: 100%;
+    pointer-events: none;
   }
   #countdown {
     position: absolute;
@@ -223,7 +224,7 @@
       <!-- Camera -->
       <div class="camera-wrap" id="cameraWrap">
         <video id="video" autoplay playsinline muted></video>
-        <canvas id="snapshot"></canvas>
+        <img id="snapshot" alt="Snapshot">
         <canvas id="overlay"></canvas>
         <div id="countdown"></div>
       </div>
@@ -317,6 +318,10 @@ const overlayEl   = document.getElementById("overlay");
 const countdownEl = document.getElementById("countdown");
 const resultEl    = document.getElementById("result");
 
+// Hidden canvas used only for frame capture & preprocessing
+const captureCanvas = document.createElement("canvas");
+const captureCtx = captureCanvas.getContext("2d");
+
 // Pick initial task & wire reroll
 pickTask(false);
 document.getElementById("rerollBtn").addEventListener("click", () => pickTask(true));
@@ -349,6 +354,7 @@ startBtn.addEventListener("click", async () => {
   videoEl.style.display = "block";
   snapshotEl.style.display = "none";
   const overlayCtx = overlayEl.getContext("2d");
+  overlayCtx.clearRect(0, 0, overlayEl.width, overlayEl.height);
 
   // 1. Webcam
   let stream;
@@ -368,10 +374,6 @@ startBtn.addEventListener("click", async () => {
   await new Promise(r => { videoEl.onloadedmetadata = r; });
   await videoEl.play();
 
-  overlayEl.width = videoEl.videoWidth;
-  overlayEl.height = videoEl.videoHeight;
-  overlayCtx.clearRect(0, 0, overlayEl.width, overlayEl.height);
-
   // 2. Countdown
   statusEl.textContent = "";
   for (let i = 3; i >= 1; i--) {
@@ -383,29 +385,39 @@ startBtn.addEventListener("click", async () => {
   await sleep(400);
   countdownEl.style.display = "none";
 
-  // 3. Capture frame to snapshot canvas
-  snapshotEl.width = videoEl.videoWidth;
-  snapshotEl.height = videoEl.videoHeight;
-  const snapCtx = snapshotEl.getContext("2d");
-  snapCtx.drawImage(videoEl, 0, 0);
+  // 3. Capture frame to hidden canvas, then show as <img>
+  const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
+  captureCanvas.width = vw;
+  captureCanvas.height = vh;
+  captureCtx.drawImage(videoEl, 0, 0, vw, vh);
 
-  // Stop camera, swap video for frozen frame
+  // Stop camera
   stream.getTracks().forEach(t => t.stop());
+
+  // Convert to data URL and show as <img>
+  snapshotEl.src = captureCanvas.toDataURL("image/jpeg");
+  await new Promise(r => { snapshotEl.onload = r; });
   videoEl.style.display = "none";
   snapshotEl.style.display = "block";
 
-  // 4. Preprocess & run
+  // Size overlay to match video resolution
+  overlayEl.width = vw;
+  overlayEl.height = vh;
+
+  // 4. Preprocess from hidden canvas & run
   statusEl.textContent = "🔍 Erkennung läuft…";
-  const inputTensor = preprocessFrame(snapshotEl);
+  const inputTensor = preprocessFrame(captureCanvas);
 
   try {
     const results = await session.run({ images: inputTensor });
     const output = results[Object.keys(results)[0]];
-    const detections = postprocess(output, snapshotEl.width, snapshotEl.height);
+    const detections = postprocess(output, vw, vh);
 
-    // 5. Draw boxes
-    overlayEl.width = snapshotEl.width;
-    overlayEl.height = snapshotEl.height;
+    // 5. Draw boxes on overlay
+    const overlayCtx = overlayEl.getContext("2d");
+    overlayCtx.clearRect(0, 0, vw, vh);
+    console.log(`[CATCHA] Overlay canvas size: ${overlayEl.width}x${overlayEl.height}, CSS size: ${overlayEl.offsetWidth}x${overlayEl.offsetHeight}`);
+    console.log(`[CATCHA] Detections: ${detections.length}`, detections);
     drawDetections(overlayCtx, detections);
 
     // 6. Result
@@ -468,28 +480,61 @@ function preprocessFrame(sourceCanvas) {
 // --- Postprocessing ---
 function postprocess(outputTensor, origW, origH) {
   const data = outputTensor.data;
+  const dims = outputTensor.dims;
   const numClasses = 80;
-  const numDet = outputTensor.dims[2];
+  const numDet = dims[2]; // 8400
+
+  console.log(`[CATCHA] Output tensor dims: [${dims}], total elements: ${data.length}`);
+  console.log(`[CATCHA] Sample row0[0..3]:`, data[0], data[1], data[2], data[3]);
+
+  // Check if coordinates are normalized (0-1) or pixel (0-640)
+  // Sample a few cx values from row 0
+  let maxCx = 0;
+  for (let i = 0; i < Math.min(100, numDet); i++) {
+    if (data[i] > maxCx) maxCx = data[i];
+  }
+  const isNormalized = maxCx <= 1.1;
+  console.log(`[CATCHA] maxCx sample=${maxCx.toFixed(4)}, isNormalized=${isNormalized}`);
+
   const scale = Math.min(MODEL_SIZE / origW, MODEL_SIZE / origH);
   const dx = (MODEL_SIZE - origW * scale) / 2;
   const dy = (MODEL_SIZE - origH * scale) / 2;
   const raw = [];
 
+  // Standard [1, 84, 8400] layout: data[row * numDet + col]
   for (let i = 0; i < numDet; i++) {
-    const cx = data[0 * numDet + i], cy = data[1 * numDet + i];
-    const w  = data[2 * numDet + i], h  = data[3 * numDet + i];
+    let cx = data[0 * numDet + i];
+    let cy = data[1 * numDet + i];
+    let w  = data[2 * numDet + i];
+    let h  = data[3 * numDet + i];
+
+    // If normalized, scale to model input size
+    if (isNormalized) {
+      cx *= MODEL_SIZE;
+      cy *= MODEL_SIZE;
+      w  *= MODEL_SIZE;
+      h  *= MODEL_SIZE;
+    }
+
     let maxScore = 0, maxClass = 0;
     for (let c = 0; c < numClasses; c++) {
       const s = data[(4 + c) * numDet + i];
       if (s > maxScore) { maxScore = s; maxClass = c; }
     }
     if (maxScore < CONF_THRESHOLD) continue;
-    raw.push({
-      x1: ((cx - w/2) - dx) / scale, y1: ((cy - h/2) - dy) / scale,
-      x2: ((cx + w/2) - dx) / scale, y2: ((cy + h/2) - dy) / scale,
-      score: maxScore, classId: maxClass
-    });
+
+    // Convert from model coords (letterboxed) to original image coords
+    const x1 = ((cx - w / 2) - dx) / scale;
+    const y1 = ((cy - h / 2) - dy) / scale;
+    const x2 = ((cx + w / 2) - dx) / scale;
+    const y2 = ((cy + h / 2) - dy) / scale;
+
+    raw.push({ x1, y1, x2, y2, score: maxScore, classId: maxClass });
   }
+
+  console.log(`[CATCHA] Raw detections (pre-NMS): ${raw.length}`);
+  if (raw.length > 0) console.log(`[CATCHA] Sample box:`, raw[0]);
+
   return nms(raw, IOU_THRESHOLD);
 }
 
@@ -521,10 +566,12 @@ function iou(a, b) {
 // --- Drawing ---
 function drawDetections(ctx, detections) {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  console.log(`[CATCHA] drawDetections called, ${detections.length} items, canvas: ${ctx.canvas.width}x${ctx.canvas.height}`);
   for (const d of detections) {
     const isTarget = d.classId === currentTask.classId;
     const color = isTarget ? "#2a9d2a" : "#0066a2";
     const label = `${displayName(d.classId)} ${(d.score*100).toFixed(0)}%`;
+    console.log(`[CATCHA] Drawing: ${label} at (${d.x1.toFixed(1)}, ${d.y1.toFixed(1)}) → (${d.x2.toFixed(1)}, ${d.y2.toFixed(1)}) color=${color}`);
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.strokeRect(d.x1, d.y1, d.x2 - d.x1, d.y2 - d.y1);
