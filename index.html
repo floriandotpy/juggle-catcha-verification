@@ -24,15 +24,15 @@
   .forum-header {
     background: #0066a2;
     color: #fff;
-    padding: 10px 16px;
-    font-size: 11px;
+    padding: 8px 16px;
+    font-size: 10px;
     border-radius: 6px 6px 0 0;
     display: flex;
     justify-content: space-between;
     align-items: center;
   }
-  .forum-header .breadcrumb { opacity: 0.85; }
-  .forum-header .user { font-weight: bold; }
+  .forum-header .breadcrumb { opacity: 0.6; }
+  .forum-header .user { font-weight: bold; opacity: 0.7; }
 
   /* --- Main panel --- */
   .forum-panel {
@@ -50,14 +50,14 @@
     padding: 14px 18px;
   }
   .title-row h1 {
-    font-size: 20px;
+    font-size: 18px;
     color: #0066a2;
     margin: 0 0 2px;
     letter-spacing: 2px;
   }
   .title-row .subtitle {
-    font-size: 12px;
-    color: #666;
+    font-size: 11px;
+    color: #999;
   }
 
   /* --- Content area --- */
@@ -69,15 +69,28 @@
   .task-box {
     background: #f0f6fa;
     border: 1px solid #b3d1e6;
-    border-left: 4px solid #0066a2;
-    padding: 12px 16px;
-    margin-bottom: 16px;
+    border-left: 6px solid #0066a2;
+    padding: 18px 20px;
+    margin: 24px 0 20px;
     font-size: 13px;
     color: #1a3d5c;
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
     gap: 12px;
+  }
+  .task-box .task-label {
+    display: block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #0066a2;
+    margin-bottom: 6px;
+    font-weight: bold;
+  }
+  .task-box .task-desc {
+    font-size: 16px;
+    line-height: 1.4;
   }
   .task-box strong { color: #0066a2; }
   #rerollBtn {
@@ -96,9 +109,9 @@
 
   /* --- Status --- */
   #status {
-    font-size: 12px;
-    color: #666;
-    margin-bottom: 12px;
+    font-size: 11px;
+    color: #999;
+    margin-bottom: 10px;
     min-height: 1.3em;
   }
 
@@ -179,9 +192,9 @@
   .forum-footer {
     background: linear-gradient(to bottom, #f2f2f2, #e0e0e0);
     border-top: 1px solid #d0d0d0;
-    padding: 10px 18px;
-    font-size: 10px;
-    color: #999;
+    padding: 8px 18px;
+    font-size: 9px;
+    color: #666;
     text-align: center;
     border-radius: 0 0 6px 6px;
   }
@@ -197,7 +210,7 @@
 
   <!-- Forum header -->
   <div class="forum-header">
-    <span class="breadcrumb">Forum &rsaquo; Neuen Beitrag erstellen &rsaquo; Verifizierung</span>
+    <span class="breadcrumb">Forum &rsaquo; Verifizierung</span>
     <span class="user">👤 Gast</span>
   </div>
 
@@ -205,7 +218,7 @@
     <!-- Title -->
     <div class="title-row">
       <h1>CATCHA</h1>
-      <span class="subtitle">Kamera-Verifizierung &mdash; Beweise, dass du kein Roboter bist</span>
+      <span class="subtitle">Jonglier-Verifizierung per Kamera &bull; Beweise, dass du kein Roboter bist</span>
     </div>
 
     <div class="content">
@@ -232,7 +245,7 @@
   </div>
 
   <div class="forum-footer">
-    CATCHA v1.0 &bull; Verifizierung läuft lokal in deinem Browser &bull; Keine Daten werden übertragen
+    CATCHA v1.0 (1. April 2026) &bull; Analyse vom Bild läuft lokal in deinem Browser &bull; Keine Daten werden hochgeladen
   </div>
 </div>
 
@@ -300,7 +313,7 @@ function pickTask(excludeCurrent) {
 function renderTask() {
   const numWord = ["", "EINEN", "ZWEI", "DREI"][currentTask.count];
   document.getElementById("taskText").innerHTML =
-    `📋 <strong>Aufgabe:</strong> Halte <strong>${numWord}</strong> ${currentTask.label} in die Kamera.`;
+    `<span class="task-label">📋 Aufgabe</span><span class="task-desc">Halte <strong>${numWord}</strong> ${currentTask.label} in die Kamera.</span>`;
 }
 
 function displayName(classId) {
@@ -334,7 +347,7 @@ async function loadModel() {
     ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.21.0/dist/";
     const opts = { executionProviders: ["wasm"] };
     session = await ort.InferenceSession.create("/model/yolov8n.onnx", opts);
-    statusEl.textContent = "✅ Modell geladen. Bereit!";
+    statusEl.textContent = "";
     startBtn.disabled = false;
   } catch (e) {
     statusEl.textContent = "❌ Modell konnte nicht geladen werden: " + (e.message || e);
