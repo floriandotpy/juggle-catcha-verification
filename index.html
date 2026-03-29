@@ -434,8 +434,11 @@ startBtn.addEventListener("click", async () => {
   stream.getTracks().forEach(t => t.stop());
 
   // Convert to data URL and show as <img>
-  snapshotEl.src = captureCanvas.toDataURL("image/jpeg");
+  const dataUrl = captureCanvas.toDataURL("image/jpeg", 0.85);
+  snapshotEl.src = dataUrl;
   await new Promise(r => { snapshotEl.onload = r; });
+  // Free the data URL blob from memory
+  snapshotEl.onload = null;
   videoEl.style.display = "none";
   snapshotEl.style.display = "block";
 
@@ -447,8 +450,16 @@ startBtn.addEventListener("click", async () => {
   statusEl.textContent = "🔍 Erkennung läuft…";
   const inputTensor = preprocessFrame(captureCanvas);
 
+  // Free capture canvas memory
+  captureCanvas.width = 1;
+  captureCanvas.height = 1;
+
   try {
     const results = await session.run({ images: inputTensor });
+
+    // Free input tensor
+    inputTensor.dispose?.();
+
     const output = results[Object.keys(results)[0]];
     const detections = postprocess(output, vw, vh);
 
